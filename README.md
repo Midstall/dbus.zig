@@ -1,2 +1,3 @@
 # dbus.zig
-DBus packaging &amp; bindings in Zig
+
+DBus implemented in Zig
