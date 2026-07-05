@@ -1,31 +1,8 @@
 .{
-    .name = "dbus.zig",
-    .version = "1.14.10",
-    .paths = .{"."},
-    .dependencies = .{
-        .dbus = .{
-            .url = "https://dbus.freedesktop.org/releases/dbus/dbus-1.14.10.tar.xz",
-            .hash = "12205f2bf69294216864d8ced53358d2ea3e7dfda7c586581df65d6a8ab3fcb3e23d",
-        },
-        .expat = .{
-            .url = "https://github.com/MidstallSoftware/expat.zig/archive/0b908b69f347b50a25faa29b54dd5557f050c01c.tar.gz",
-            .hash = "122068333e288a0fc27813c2335aa8e2d66c37602737f572ec803f29fb7f26375ca1",
-        },
-        .@"libcap-ng" = .{
-            .url = "https://github.com/MidstallSoftware/libcap-ng.zig/archive/3b9b2a81d817bc2e579d10a8e61327bc5c322346.tar.gz",
-            .hash = "1220405f67f78da335345bbea315ab6bab96e0f23a4c63da11852a18929113613ff7",
-        },
-        .libaudit = .{
-            .url = "https://github.com/MidstallSoftware/libaudit.zig/archive/fb23cb4cf69b2dd6b1bca09b7bfa8106db90c044.tar.gz",
-            .hash = "12200a06fb7904e5c889fb166d308a2bfb68fb6ccdc935ab8aaa391f8c1f7616bc2d",
-        },
-        .apparmor = .{
-            .url = "https://github.com/MidstallSoftware/apparmor.zig/archive/cf38b107e6f4b82b35466233473d1a98a16601c9.tar.gz",
-            .hash = "122014e187ac96e85a93e24ec7663bfc7a844fb6b813a448173a74e9cb069a9067ff",
-        },
-        .selinux = .{
-            .url = "https://github.com/MidstallSoftware/selinux.zig/archive/1e98d94f24c404739004a8c1cbe43c49e7a926b0.tar.gz",
-            .hash = "1220bd0e542ac0c2e134727ba14b3f6917c3bd72b353018e2c86cd53a7aaa41164cc",
-        },
-    },
+    .name = .dbus,
+    .version = "0.1.0",
+    .minimum_zig_version = "0.16.0",
+    .fingerprint = 0x45170d33c00c5ef0,
+    .dependencies = .{},
+    .paths = .{ "build.zig.zon", "build.zig", "src" },
 }

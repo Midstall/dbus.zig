@@ -1,0 +1,63 @@
+{
+  "nodes": {
+    "flakever": {
+      "locked": {
+        "lastModified": 1763450705,
+        "narHash": "sha256-TUSrRfT76OAXty9A4fXlOOfVfJGDglFQs06b8b+f5NY=",
+        "owner": "numinit",
+        "repo": "flakever",
+        "rev": "a69629e4133fbcdf3c7aae477bd6687bb19e0778",
+        "type": "github"
+      },
+      "original": {
+        "owner": "numinit",
+        "repo": "flakever",
+        "type": "github"
+      }
+    },
+    "nixpkgs": {
+      "locked": {
+        "lastModified": 1783293849,
+        "narHash": "sha256-nqpp57D3K7mynfSF/UkGXia5MpTv4OKLlILTw11Dsqc=",
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "00d642560bd1d2daf9939eb710c552d5dcddd737",
+        "type": "github"
+      },
+      "original": {
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "type": "github"
+      }
+    },
+    "root": {
+      "inputs": {
+        "flakever": "flakever",
+        "nixpkgs": "nixpkgs",
+        "treefmt-nix": "treefmt-nix"
+      }
+    },
+    "treefmt-nix": {
+      "inputs": {
+        "nixpkgs": [
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1780220602,
+        "narHash": "sha256-eynAfOmbmxJnkp7YewvCEbShNnnYJ9gLLqkzsYtBPeM=",
+        "owner": "numtide",
+        "repo": "treefmt-nix",
+        "rev": "db947814a175b7ca6ded66e21383d938df01c227",
+        "type": "github"
+      },
+      "original": {
+        "owner": "numtide",
+        "repo": "treefmt-nix",
+        "type": "github"
+      }
+    }
+  },
+  "root": "root",
+  "version": 7
+}
