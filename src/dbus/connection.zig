@@ -46,6 +46,7 @@ pub const Connection = struct {
     endian: std.builtin.Endian = native_endian,
     serial: u32 = 0,
     in_buf: std.ArrayList(u8) = .empty,
+    fds_in: std.ArrayList(i32) = .empty,
     pending: std.AutoHashMapUnmanaged(u32, Pending) = .empty,
     filters: std.ArrayList(Filter) = .empty,
     disconnected: bool = false,
@@ -60,6 +61,8 @@ pub const Connection = struct {
             self.source = null;
         }
         self.in_buf.deinit(self.gpa);
+        for (self.fds_in.items) |fd| _ = linux.close(fd);
+        self.fds_in.deinit(self.gpa);
         self.pending.deinit(self.gpa);
         self.filters.deinit(self.gpa);
         self.transport.close();
@@ -124,18 +127,26 @@ pub const Connection = struct {
 
     fn readReady(self: *Connection) void {
         var buf: [8192]u8 = undefined;
-        const n = self.transport.read(&buf) catch {
+        var fdbuf: [transport.max_fds]i32 = undefined;
+        const res = self.transport.recvWithFds(&buf, &fdbuf) catch {
             self.fail();
             return;
         };
-        if (n == 0) {
+        if (res.bytes == 0) {
             self.fail(); // EOF
             return;
         }
-        self.in_buf.appendSlice(self.gpa, buf[0..n]) catch {
+        self.in_buf.appendSlice(self.gpa, buf[0..res.bytes]) catch {
             self.fail();
             return;
         };
+        if (res.fds > 0) {
+            self.fds_in.appendSlice(self.gpa, fdbuf[0..res.fds]) catch {
+                for (fdbuf[0..res.fds]) |fd| _ = linux.close(fd);
+                self.fail();
+                return;
+            };
+        }
         self.processIncoming();
     }
 
@@ -154,11 +165,20 @@ pub const Connection = struct {
                 return;
             }
             if (self.in_buf.items.len < total) return; // need more bytes
-            const msg = Message.deserialize(self.gpa, self.in_buf.items[0..total]) catch {
+            var msg = Message.deserialize(self.gpa, self.in_buf.items[0..total]) catch {
                 self.fail();
                 return;
             };
+            // Attach any fds this message declared (they rode in via SCM_RIGHTS,
+            // ordered ahead of or with these bytes). Borrowed for the callback;
+            // closed right after, so a handler must dup one it wants to keep.
+            const nfds = @min(msg.unix_fds orelse 0, self.fds_in.items.len);
+            msg.fds = self.fds_in.items[0..nfds];
             self.dispatch(&msg);
+            for (self.fds_in.items[0..nfds]) |fd| _ = linux.close(fd);
+            const fd_rem = self.fds_in.items.len - nfds;
+            std.mem.copyForwards(i32, self.fds_in.items[0..fd_rem], self.fds_in.items[nfds..]);
+            self.fds_in.shrinkRetainingCapacity(fd_rem);
             if (self.disconnected) return;
             const rem = self.in_buf.items.len - total;
             std.mem.copyForwards(u8, self.in_buf.items[0..rem], self.in_buf.items[total..]);
@@ -248,6 +268,79 @@ test "two connections exchange a method call and its reply" {
     while (!catcher.got and i < 100) : (i += 1) _ = loop.dispatch(50);
     try testing.expect(catcher.got);
     try testing.expectEqual(serial, catcher.reply_serial);
+}
+
+const FdCatcher = struct {
+    got: bool = false,
+    fd: i32 = -1,
+    fn filter(ctx: ?*anyopaque, conn: *Connection, msg: *const Message) FilterResult {
+        _ = conn;
+        const self: *FdCatcher = @ptrCast(@alignCast(ctx.?));
+        if (msg.msg_type != .method_call) return .pass;
+        self.got = true;
+        if (msg.fds.len == 1) {
+            // Borrowed for this callback only; dup to keep it past return.
+            const rc = linux.fcntl(msg.fds[0], linux.F.DUPFD_CLOEXEC, 0);
+            if (posix.errno(rc) == .SUCCESS) self.fd = @intCast(rc);
+        }
+        return .handled;
+    }
+};
+
+const marshal = @import("marshal.zig");
+
+test "a received message exposes its SCM_RIGHTS fds" {
+    var loop = try el.EventLoop.init(testing.allocator);
+    defer loop.deinit();
+
+    const fds = try socketpair();
+    var conn = Connection.init(testing.allocator, Transport.fromFd(fds[0]), &loop);
+    defer conn.deinit();
+    var peer = Transport.fromFd(fds[1]);
+    defer peer.close();
+    try conn.register();
+
+    var catcher = FdCatcher{};
+    try conn.addFilter(FdCatcher.filter, &catcher);
+
+    // Build a method_call carrying one unix_fd (index 0) in its body.
+    var body: std.ArrayList(u8) = .empty;
+    defer body.deinit(testing.allocator);
+    var w = marshal.Writer.init(testing.allocator, &body, native_endian);
+    try w.unixFd(0);
+    const call = Message{
+        .msg_type = .method_call,
+        .serial = 1,
+        .path = "/x",
+        .member = "Take",
+        .body_signature = "h",
+        .unix_fds = 1,
+        .body = body.items,
+    };
+    var wire: std.ArrayList(u8) = .empty;
+    defer wire.deinit(testing.allocator);
+    try call.serialize(testing.allocator, &wire, native_endian);
+
+    // Pass one end of an auxiliary pipe as the fd.
+    const aux = try socketpair();
+    var aux_peer = Transport.fromFd(aux[1]);
+    defer aux_peer.close();
+    _ = try peer.sendWithFds(wire.items, &.{aux[0]});
+    _ = linux.close(aux[0]);
+
+    var i: usize = 0;
+    while (!catcher.got and i < 50) : (i += 1) _ = loop.dispatch(20);
+    try testing.expect(catcher.got);
+    try testing.expect(catcher.fd >= 0);
+
+    // Prove the received fd is live: write through aux_peer, read from it.
+    defer _ = linux.close(catcher.fd);
+    _ = try aux_peer.write("z");
+    var rb: [1]u8 = undefined;
+    var recv_end = Transport.fromFd(catcher.fd);
+    const rn = try recv_end.read(&rb);
+    try testing.expectEqual(@as(usize, 1), rn);
+    try testing.expectEqualStrings("z", rb[0..]);
 }
 
 test "an oversized declared length disconnects instead of buffering" {

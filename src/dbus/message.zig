@@ -95,6 +95,11 @@ pub const Message = struct {
     body_signature: ?[]const u8 = null,
     unix_fds: ?u32 = null,
     body: []const u8 = &.{},
+    /// File descriptors received with this message via SCM_RIGHTS, in order. A
+    /// `unix_fd` body value is an index into this slice. Only valid for the
+    /// duration of the receiving callback: the connection closes these after
+    /// dispatch, so a handler that wants to keep one must dup it. Empty on send.
+    fds: []const i32 = &.{},
     /// Endianness the message was received in; set by `deserialize`, used to read
     /// the body. Ignored by `serialize` (which takes an explicit endian).
     endian: std.builtin.Endian = native_endian,
