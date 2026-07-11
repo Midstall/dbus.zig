@@ -154,18 +154,28 @@ fn emitVtable(gpa: std.mem.Allocator, w: *Buf, iface: Interface) !void {
             try w.print(gpa, "            // skipped method {s} (unsupported arg types)\n", .{m.name});
             continue;
         }
-        try w.print(gpa, "            fn h_{s}(ctx: ?*anyopaque, call: *const Message, w: *Writer) HandlerError![]const u8 {{\n", .{m.name});
-        try w.appendSlice(gpa, "                const self: *Impl = @ptrCast(@alignCast(ctx.?));\n");
-        try w.appendSlice(gpa, "                var r = Reader.init(call.body, call.endian);\n");
+
         var argi: usize = 0;
         for (m.args) |a| {
-            if (a.dir != .in_) continue;
-            try w.print(gpa, "                const in{d} = r.{s}() catch return error.Failed;\n", .{ argi, readerCall(a.sig[0]) });
-            argi += 1;
+            if (a.dir == .in_) argi += 1;
+        }
+
+        try w.print(gpa, "            fn h_{s}(ctx: ?*anyopaque, call: *const Message, w: *Writer) HandlerError![]const u8 {{\n", .{m.name});
+        try w.appendSlice(gpa, "                const self: *Impl = @ptrCast(@alignCast(ctx.?));\n");
+        if (argi > 0) {
+            var i: usize = 0;
+            try w.appendSlice(gpa, "                var r = Reader.init(call.body, call.endian);\n");
+            for (m.args) |a| {
+                if (a.dir != .in_) continue;
+                try w.print(gpa, "                const in{d} = r.{s}() catch return error.Failed;\n", .{ i, readerCall(a.sig[0]) });
+                i += 1;
+            }
+        } else {
+            try w.appendSlice(gpa, "                _ = call;\n");
         }
         // Call the impl.
         const out = outArg(m);
-        if (out != null) {
+        if (out) |_| {
             try w.print(gpa, "                const ret = self.{s}(", .{m.name});
         } else {
             try w.print(gpa, "                self.{s}(", .{m.name});
@@ -180,6 +190,7 @@ fn emitVtable(gpa: std.mem.Allocator, w: *Buf, iface: Interface) !void {
             try w.print(gpa, "                try w.{s}(ret);\n", .{writerCall(o.sig[0])});
             try w.print(gpa, "                return \"{s}\";\n", .{o.sig});
         } else {
+            try w.appendSlice(gpa, "                _ = w;\n");
             try w.appendSlice(gpa, "                return \"\";\n");
         }
         try w.appendSlice(gpa, "            }\n");
@@ -188,6 +199,13 @@ fn emitVtable(gpa: std.mem.Allocator, w: *Buf, iface: Interface) !void {
     // The method table + interface() builder (ctx bound to the impl instance).
     try w.appendSlice(gpa, "\n            methods: [n_methods]Method,\n");
     try w.appendSlice(gpa, "            pub fn init(impl: *Impl) Self {\n");
+
+    for (iface.methods) |m| {
+        if (methodSupported(m)) break;
+    } else {
+        try w.appendSlice(gpa, "                _ = impl;\n");
+    }
+
     try w.appendSlice(gpa, "                return .{ .methods = .{\n");
     for (iface.methods) |m| {
         if (!methodSupported(m)) continue;
@@ -240,15 +258,17 @@ fn emitProxy(gpa: std.mem.Allocator, w: *Buf, iface: Interface) !void {
         try w.appendSlice(gpa, ", cb: ReplyFn, ctx: ?*anyopaque) !u32 {\n");
         try w.appendSlice(gpa, "            var body: std.ArrayList(u8) = .empty;\n");
         try w.appendSlice(gpa, "            defer body.deinit(self.bus.gpa);\n");
-        try w.appendSlice(gpa, "            var bw = Writer.init(self.bus.gpa, &body, self.bus.conn.endian);\n");
         var in_sig: Buf = .empty;
         defer in_sig.deinit(gpa);
-        var j: usize = 0;
-        for (m.args) |a| {
-            if (a.dir != .in_) continue;
-            try w.print(gpa, "            try bw.{s}(in{d});\n", .{ writerCall(a.sig[0]), j });
-            try in_sig.appendSlice(gpa, a.sig);
-            j += 1;
+        if (argi > 0) {
+            try w.appendSlice(gpa, "            var bw = Writer.init(self.bus.gpa, &body, self.bus.conn.endian);\n");
+            var j: usize = 0;
+            for (m.args) |a| {
+                if (a.dir != .in_) continue;
+                try w.print(gpa, "            try bw.{s}(in{d});\n", .{ writerCall(a.sig[0]), j });
+                try in_sig.appendSlice(gpa, a.sig);
+                j += 1;
+            }
         }
         try w.print(gpa, "            const msg = Message{{ .msg_type = .method_call, .serial = 0, .path = self.path, .interface = name, .member = \"{s}\", .destination = self.destination", .{m.name});
         if (in_sig.items.len > 0) {
